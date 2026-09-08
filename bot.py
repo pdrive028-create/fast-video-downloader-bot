@@ -128,6 +128,9 @@ user_formats = {}
 
 YOUTUBE_CLIENTS = [
     ["mweb"],
+    ["android_vr"],
+    ["tv"],
+    ["web_embedded"],
 ]
 
 
