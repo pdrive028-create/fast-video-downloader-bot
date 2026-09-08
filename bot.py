@@ -5,7 +5,11 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import (
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    FSInputFile,
+)
 
 import yt_dlp
 import imageio_ffmpeg
@@ -25,6 +29,21 @@ dp = Dispatcher()
 user_formats = {}
 
 
+# ---------------------------------------------------------
+# YOUTUBE SETTINGS
+# ---------------------------------------------------------
+
+YOUTUBE_CLIENTS = [
+    ["android_vr"],
+    ["tv"],
+    ["web_embedded"],
+]
+
+
+# ---------------------------------------------------------
+# START
+# ---------------------------------------------------------
+
 @dp.message(CommandStart())
 async def start(message: types.Message):
     await message.answer(
@@ -35,57 +54,135 @@ async def start(message: types.Message):
     )
 
 
+# ---------------------------------------------------------
+# GET VIDEO INFO
+# ---------------------------------------------------------
+
 def get_video_info(url: str):
-    options = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "ffmpeg_location": FFMPEG_PATH,
-    }
 
-    with yt_dlp.YoutubeDL(options) as ydl:
-        return ydl.extract_info(url, download=False)
+    last_error = None
 
+    for clients in YOUTUBE_CLIENTS:
+
+        options = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "ffmpeg_location": FFMPEG_PATH,
+
+            "extractor_args": {
+                "youtube": {
+                    "player_client": clients
+                }
+            },
+
+            "retries": 2,
+            "fragment_retries": 2,
+        }
+
+        try:
+
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=False)
+
+            if info:
+                return info
+
+        except Exception as e:
+
+            last_error = e
+            print(
+                f"INFO ERROR with client {clients}: "
+                f"{repr(e)}"
+            )
+
+    if last_error:
+        raise last_error
+
+    raise RuntimeError("Unable to extract video information")
+
+
+# ---------------------------------------------------------
+# QUALITY OPTIONS
+# ---------------------------------------------------------
 
 def build_quality_options(info):
+
     formats = info.get("formats", [])
 
-    heights = [2160, 1440, 1080, 720, 480]
+    heights = [
+        2160,
+        1440,
+        1080,
+        720,
+        480,
+        360,
+    ]
 
     result = []
 
     for target_height in heights:
+
         candidates = []
 
         for f in formats:
+
             height = f.get("height")
+
             if not height:
                 continue
 
             if height <= target_height:
+
                 vcodec = f.get("vcodec")
-                acodec = f.get("acodec")
 
                 if vcodec and vcodec != "none":
-                    size = f.get("filesize") or f.get("filesize_approx") or 0
 
-                    candidates.append({
-                        "format_id": f["format_id"],
-                        "height": height,
-                        "size": size,
-                        "has_audio": bool(acodec and acodec != "none"),
-                    })
+                    size = (
+                        f.get("filesize")
+                        or f.get("filesize_approx")
+                        or 0
+                    )
 
-        if candidates:
-            best = max(candidates, key=lambda x: x["height"])
+                    candidates.append(
+                        {
+                            "format_id": f.get("format_id"),
+                            "height": height,
+                            "size": size,
+                            "vcodec": vcodec,
+                            "acodec": f.get("acodec"),
+                        }
+                    )
 
-            if not any(x["height"] == best["height"] for x in result):
-                result.append(best)
+        if not candidates:
+            continue
+
+        # Highest resolution available up to target
+        best = max(
+            candidates,
+            key=lambda x: (
+                x["height"],
+                x["size"]
+            )
+        )
+
+        # Don't duplicate resolutions
+        if not any(
+            x["height"] == best["height"]
+            for x in result
+        ):
+
+            result.append(best)
 
     return result
 
 
+# ---------------------------------------------------------
+# SIZE FORMAT
+# ---------------------------------------------------------
+
 def size_text(size):
+
     if not size:
         return "Size unknown"
 
@@ -97,42 +194,71 @@ def size_text(size):
     return f"{mb:.1f} MB"
 
 
+# ---------------------------------------------------------
+# LINK RECEIVED
+# ---------------------------------------------------------
+
 @dp.message(F.text)
 async def handle_message(message: types.Message):
+
     text = message.text.strip()
 
-    if not (text.startswith("http://") or text.startswith("https://")):
-        await message.answer("📎 Please send a video link.")
+    if not (
+        text.startswith("http://")
+        or text.startswith("https://")
+    ):
+        await message.answer(
+            "📎 Please send a video link."
+        )
         return
 
-    status = await message.answer("🔍 Analyzing video...\n\nPlease wait ⚡")
+    status = await message.answer(
+        "🔍 Analyzing video...\n\n"
+        "Please wait ⚡"
+    )
 
     try:
-        info = await asyncio.to_thread(get_video_info, text)
 
-        title = info.get("title", "Video")
+        info = await asyncio.to_thread(
+            get_video_info,
+            text
+        )
+
+        title = info.get(
+            "title",
+            "Video"
+        )
+
         formats = build_quality_options(info)
 
         if not formats:
+
             await status.edit_text(
                 "❌ No downloadable video qualities were found."
             )
             return
 
-        user_formats[message.from_user.id] = {}
+        user_id = message.from_user.id
+
+        user_formats[user_id] = {}
 
         buttons = []
 
         for index, fmt in enumerate(formats):
+
             key = str(index)
 
-            user_formats[message.from_user.id][key] = {
+            user_formats[user_id][key] = {
                 "url": text,
                 "format_id": fmt["format_id"],
                 "height": fmt["height"],
             }
 
-            label = f"{fmt['height']}p • {size_text(fmt['size'])}"
+            label = (
+                f"{fmt['height']}p"
+                f" • "
+                f"{size_text(fmt['size'])}"
+            )
 
             buttons.append(
                 [
@@ -143,7 +269,9 @@ async def handle_message(message: types.Message):
                 ]
             )
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=buttons
+        )
 
         await status.edit_text(
             f"🎬 {title}\n\n"
@@ -152,57 +280,123 @@ async def handle_message(message: types.Message):
         )
 
     except Exception as e:
-        print("INFO ERROR:", repr(e))
+
+        print(
+            "INFO ERROR:",
+            repr(e)
+        )
 
         await status.edit_text(
             "❌ Could not analyze this link.\n\n"
-            "Please check the URL and try again."
+            "YouTube may be blocking this server request.\n"
+            "Please try again."
         )
 
 
-@dp.callback_query(F.data.startswith("quality:"))
-async def quality_selected(callback: types.CallbackQuery):
+# ---------------------------------------------------------
+# QUALITY BUTTON
+# ---------------------------------------------------------
+
+@dp.callback_query(
+    F.data.startswith("quality:")
+)
+async def quality_selected(
+    callback: types.CallbackQuery
+):
+
     user_id = callback.from_user.id
-    key = callback.data.split(":", 1)[1]
+
+    key = callback.data.split(
+        ":",
+        1
+    )[1]
 
     if user_id not in user_formats:
-        await callback.answer("This selection expired. Send the link again.", show_alert=True)
+
+        await callback.answer(
+            "This selection expired. "
+            "Send the link again.",
+            show_alert=True
+        )
+
         return
 
     selected = user_formats[user_id].get(key)
 
     if not selected:
-        await callback.answer("Selection expired. Send the link again.", show_alert=True)
+
+        await callback.answer(
+            "Selection expired. "
+            "Send the link again.",
+            show_alert=True
+        )
+
         return
 
     await callback.answer()
 
+    height = selected["height"]
+
     await callback.message.edit_text(
-        f"⏳ Preparing {selected['height']}p video...\n\n"
+        f"⏳ Preparing {height}p video...\n\n"
         "⚡ Downloading..."
     )
 
     url = selected["url"]
-    format_id = selected["format_id"]
-    height = selected["height"]
 
-    temp_dir = Path(tempfile.mkdtemp(prefix="video_dl_"))
-    output_template = str(temp_dir / "%(title).80s.%(ext)s")
+    temp_dir = Path(
+        tempfile.mkdtemp(
+            prefix="video_dl_"
+        )
+    )
+
+    output_template = str(
+        temp_dir /
+        "%(title).80s.%(ext)s"
+    )
 
     try:
-        # Prefer selected video + best audio.
+
+        # -------------------------------------------------
+        # DOWNLOAD
+        # -------------------------------------------------
+
         format_selector = (
-            f"{format_id}+bestaudio/best[height<={height}]"
+            f"bestvideo[height<={height}]"
+            "+bestaudio/"
+            f"best[height<={height}]"
         )
 
         options = {
             "format": format_selector,
+
             "outtmpl": output_template,
+
             "merge_output_format": "mp4",
+
             "noplaylist": True,
+
             "quiet": True,
+
             "no_warnings": True,
+
             "ffmpeg_location": FFMPEG_PATH,
+
+            "retries": 3,
+
+            "fragment_retries": 3,
+
+            "continuedl": True,
+
+            "concurrent_fragment_downloads": 4,
+
+            "extractor_args": {
+                "youtube": {
+                    "player_client": [
+                        "android_vr"
+                    ]
+                }
+            },
         }
 
         await asyncio.to_thread(
@@ -211,22 +405,41 @@ async def quality_selected(callback: types.CallbackQuery):
             options
         )
 
-        files = list(temp_dir.glob("*"))
+        # -------------------------------------------------
+        # FIND DOWNLOADED FILE
+        # -------------------------------------------------
+
+        files = list(
+            temp_dir.glob("*")
+        )
 
         video_file = None
 
         for file in files:
-            if file.is_file() and file.suffix.lower() in {
-                ".mp4",
-                ".mkv",
-                ".webm",
-                ".mov"
-            }:
+
+            if (
+                file.is_file()
+                and file.suffix.lower()
+                in {
+                    ".mp4",
+                    ".mkv",
+                    ".webm",
+                    ".mov"
+                }
+            ):
+
                 video_file = file
                 break
 
         if not video_file:
-            raise RuntimeError("Downloaded video file not found")
+
+            raise RuntimeError(
+                "Downloaded video file not found"
+            )
+
+        # -------------------------------------------------
+        # UPLOAD
+        # -------------------------------------------------
 
         await callback.message.edit_text(
             f"✅ {height}p download complete!\n\n"
@@ -235,13 +448,20 @@ async def quality_selected(callback: types.CallbackQuery):
 
         await callback.message.answer_document(
             FSInputFile(video_file),
-            caption=f"🎬 {height}p • Fast Video Downloader"
+            caption=(
+                f"🎬 {height}p\n"
+                "⚡ Fast Video Downloader"
+            )
         )
 
         await callback.message.delete()
 
     except Exception as e:
-        print("DOWNLOAD ERROR:", repr(e))
+
+        print(
+            "DOWNLOAD ERROR:",
+            repr(e)
+        )
 
         await callback.message.edit_text(
             "❌ Download failed.\n\n"
@@ -249,29 +469,64 @@ async def quality_selected(callback: types.CallbackQuery):
         )
 
     finally:
+
+        # -------------------------------------------------
+        # DELETE TEMP FILES
+        # -------------------------------------------------
+
         for file in temp_dir.glob("*"):
+
             try:
                 file.unlink()
+
             except Exception:
                 pass
 
         try:
             temp_dir.rmdir()
+
         except Exception:
             pass
 
-        user_formats.pop(user_id, None)
+        user_formats.pop(
+            user_id,
+            None
+        )
 
 
-def download_video(url, options):
-    with yt_dlp.YoutubeDL(options) as ydl:
+# ---------------------------------------------------------
+# DOWNLOAD FUNCTION
+# ---------------------------------------------------------
+
+def download_video(
+    url,
+    options
+):
+
+    with yt_dlp.YoutubeDL(
+        options
+    ) as ydl:
+
         ydl.download([url])
 
 
+# ---------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------
+
 async def main():
-    print("Bot started...")
-    await dp.start_polling(bot)
+
+    print(
+        "Bot started..."
+    )
+
+    await dp.start_polling(
+        bot
+    )
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+
+    asyncio.run(
+        main()
+    )
