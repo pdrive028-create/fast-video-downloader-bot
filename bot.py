@@ -1038,3 +1038,54 @@ async def main():
 
     print(
         "========================================"
+    )
+
+    print(
+        "Video Downloader 4K"
+    )
+
+    print(
+        "Bot started..."
+    )
+
+    print(
+        "Telegram Local API:",
+        LOCAL_BOT_API_URL
+        if LOCAL_BOT_API_URL
+        else "DISABLED"
+    )
+
+    print(
+        "PO Token Provider:",
+        POT_PROVIDER_URL
+    )
+
+    print(
+        "FFmpeg:",
+        FFMPEG_PATH
+    )
+
+    print(
+        "YouTube Clients:",
+        YOUTUBE_CLIENTS
+    )
+
+    print(
+        "========================================"
+    )
+
+
+    await dp.start_polling(
+        bot
+    )
+
+
+# =========================================================
+# RUN
+# =========================================================
+
+if __name__ == "__main__":
+
+    asyncio.run(
+        main()
+    )
