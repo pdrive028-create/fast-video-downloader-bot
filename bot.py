@@ -266,70 +266,110 @@ def get_video_info(url: str):
 # =========================================================
 
 def build_quality_options(info):
+    formats = info.get("formats", [])
 
-    formats = info.get(
-        "formats",
-        []
-    )
+    target_heights = [2160, 1440, 1080, 720, 480, 360]
 
-    target_heights = [
-        2160,
-        1440,
-        1080,
-        720,
-        480,
-        360,
-    ]
-
-    result = []
-
-    available_formats = []
+    video_formats = []
+    audio_formats = []
 
     for f in formats:
-
         height = f.get("height")
-
-        if not height:
-            continue
-
-        if height <= 0:
-            continue
-
         vcodec = f.get("vcodec")
-
-        if not vcodec:
-            continue
-
-        if vcodec == "none":
-            continue
-
         acodec = f.get("acodec")
-
         filesize = (
             f.get("filesize")
             or f.get("filesize_approx")
             or 0
         )
 
-        available_formats.append(
-            {
-                "format_id": f.get(
-                    "format_id"
-                ),
-
+        # VIDEO FORMAT
+        if (
+            height
+            and height > 0
+            and vcodec
+            and vcodec != "none"
+        ):
+            video_formats.append({
+                "format_id": f.get("format_id"),
                 "height": height,
-
                 "size": filesize,
-
                 "vcodec": vcodec,
-
                 "acodec": acodec,
+                "ext": f.get("ext"),
+                "tbr": f.get("tbr") or 0,
+                "fps": f.get("fps") or 0,
+            })
 
-                "ext": f.get(
-                    "ext"
-                ),
-            }
+        # AUDIO-ONLY FORMAT
+        if (
+            acodec
+            and acodec != "none"
+            and (not vcodec or vcodec == "none")
+        ):
+            audio_formats.append({
+                "size": filesize,
+                "abr": f.get("abr") or 0,
+            })
+
+    # Best available audio size for approximate final size
+    best_audio_size = 0
+
+    if audio_formats:
+        audio_formats.sort(
+            key=lambda x: (
+                x["abr"],
+                x["size"]
+            ),
+            reverse=True
         )
+        best_audio_size = audio_formats[0]["size"]
+
+    result = []
+
+    for target in target_heights:
+
+        candidates = [
+            f for f in video_formats
+            if f["height"] <= target
+        ]
+
+        if not candidates:
+            continue
+
+        # Prefer highest resolution, then bitrate,
+        # then MP4, then size.
+        candidates.sort(
+            key=lambda x: (
+                x["height"],
+                x["tbr"],
+                1 if x["ext"] == "mp4" else 0,
+                x["size"]
+            ),
+            reverse=True
+        )
+
+        best = candidates[0]
+
+        # Don't show duplicate resolutions
+        if any(
+            x["height"] == best["height"]
+            for x in result
+        ):
+            continue
+
+        total_size = best["size"] + best_audio_size
+
+        result.append({
+            "format_id": best["format_id"],
+            "height": best["height"],
+            "size": total_size,
+            "vcodec": best["vcodec"],
+            "acodec": best["acodec"],
+            "ext": best["ext"],
+        })
+
+    return result
 
 
     # =====================================================
