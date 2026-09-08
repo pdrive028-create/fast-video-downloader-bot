@@ -10,6 +10,8 @@ from aiogram.types import (
     InlineKeyboardButton,
     FSInputFile,
 )
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 
 import yt_dlp
 import imageio_ffmpeg
@@ -32,10 +34,48 @@ POT_PROVIDER_URL = os.getenv(
 )
 
 
+# Railway private connection to Telegram Local Bot API
+LOCAL_BOT_API_URL = os.getenv(
+    "LOCAL_BOT_API_URL",
+    ""
+)
+
+
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 
-bot = Bot(TOKEN)
+# =========================================================
+# TELEGRAM BOT
+# =========================================================
+
+if LOCAL_BOT_API_URL:
+
+    print(
+        "Using Telegram Local Bot API:",
+        LOCAL_BOT_API_URL
+    )
+
+    session = AiohttpSession(
+        api=TelegramAPIServer.from_base(
+            LOCAL_BOT_API_URL,
+            is_local=True
+        )
+    )
+
+    bot = Bot(
+        TOKEN,
+        session=session
+    )
+
+else:
+
+    print(
+        "Using official Telegram Cloud Bot API"
+    )
+
+    bot = Bot(TOKEN)
+
+
 dp = Dispatcher()
 
 
@@ -49,11 +89,6 @@ user_formats = {}
 # =========================================================
 # YOUTUBE CLIENTS
 # =========================================================
-#
-# Stable clients first.
-# mweb is kept as a fallback because it may require
-# PO Token handling.
-#
 
 YOUTUBE_CLIENTS = [
     ["android_vr"],
@@ -105,23 +140,15 @@ def get_video_info(url: str):
 
         options = {
             "quiet": True,
-
             "no_warnings": True,
-
             "noplaylist": True,
-
             "skip_download": True,
-
             "ffmpeg_location": FFMPEG_PATH,
-
             "extractor_args": youtube_extractor_args(
                 clients
             ),
-
             "retries": 3,
-
             "fragment_retries": 3,
-
             "socket_timeout": 30,
         }
 
@@ -248,8 +275,6 @@ def build_quality_options(info):
         if not candidates:
             continue
 
-        # Prefer highest resolution.
-        # If same resolution, prefer audio+video.
         candidates.sort(
             key=lambda x: (
                 x["height"],
@@ -515,19 +540,14 @@ async def quality_selected(
 
         format_selectors = [
 
-            # 1. Best combined MP4
             f"best[height<={height}][ext=mp4]",
 
-            # 2. Best available combined format
             f"best[height<={height}]",
 
-            # 3. Separate video + audio
             f"bestvideo[height<={height}]+bestaudio",
 
-            # 4. Separate video + audio with final fallback
             f"bestvideo[height<={height}]+bestaudio/best",
 
-            # 5. Any best format
             "best",
         ]
 
@@ -868,6 +888,13 @@ async def main():
     )
 
     print(
+        "Telegram Local API:",
+        LOCAL_BOT_API_URL
+        if LOCAL_BOT_API_URL
+        else "DISABLED"
+    )
+
+    print(
         "PO Token Provider:",
         POT_PROVIDER_URL
     )
@@ -900,4 +927,4 @@ if __name__ == "__main__":
 
     asyncio.run(
         main()
-        )
+    )
