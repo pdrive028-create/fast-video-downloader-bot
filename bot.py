@@ -43,11 +43,6 @@ user_formats = {}
 # YOUTUBE SETTINGS
 # =========================================================
 
-# mweb is the recommended client when using
-# a PO Token Provider.
-#
-# Fallback clients are included in case one client
-# does not work for a specific video.
 YOUTUBE_CLIENTS = [
     ["mweb"],
     ["android_vr"],
@@ -175,55 +170,50 @@ def build_quality_options(info):
 
         for f in formats:
 
-            height = f.get(
-                "height"
-            )
+            height = f.get("height")
 
             if not height:
                 continue
 
-            if height <= target_height:
+            if height > target_height:
+                continue
 
-                vcodec = f.get(
-                    "vcodec"
-                )
+            vcodec = f.get("vcodec")
 
-                if (
-                    vcodec
-                    and vcodec != "none"
-                ):
+            if not vcodec or vcodec == "none":
+                continue
 
-                    size = (
-                        f.get("filesize")
-                        or f.get("filesize_approx")
-                        or 0
-                    )
+            size = (
+                f.get("filesize")
+                or f.get("filesize_approx")
+                or 0
+            )
 
-                    candidates.append(
-                        {
-                            "format_id": f.get(
-                                "format_id"
-                            ),
-                            "height": height,
-                            "size": size,
-                            "vcodec": vcodec,
-                            "acodec": f.get(
-                                "acodec"
-                            ),
-                        }
-                    )
+            candidates.append(
+                {
+                    "format_id": f.get("format_id"),
+                    "height": height,
+                    "size": size,
+                    "vcodec": vcodec,
+                    "acodec": f.get("acodec"),
+                    "ext": f.get("ext"),
+                }
+            )
 
         if not candidates:
             continue
 
-        # Highest resolution available
-        best = max(
-            candidates,
+        # Prefer formats that already contain audio.
+        candidates.sort(
             key=lambda x: (
                 x["height"],
-                x["size"]
-            )
+                1 if x["acodec"] and x["acodec"] != "none" else 0,
+                x["size"],
+            ),
+            reverse=True
         )
+
+        best = candidates[0]
 
         # Don't duplicate resolutions
         if not any(
@@ -231,9 +221,7 @@ def build_quality_options(info):
             for x in result
         ):
 
-            result.append(
-                best
-            )
+            result.append(best)
 
     return result
 
@@ -319,20 +307,14 @@ async def handle_message(
 
         buttons = []
 
-        for index, fmt in enumerate(
-            formats
-        ):
+        for index, fmt in enumerate(formats):
 
             key = str(index)
 
             user_formats[user_id][key] = {
                 "url": text,
-                "format_id": fmt[
-                    "format_id"
-                ],
-                "height": fmt[
-                    "height"
-                ],
+                "format_id": fmt["format_id"],
+                "height": fmt["height"],
             }
 
             label = (
@@ -345,9 +327,7 @@ async def handle_message(
                 [
                     InlineKeyboardButton(
                         text=label,
-                        callback_data=(
-                            f"quality:{key}"
-                        )
+                        callback_data=f"quality:{key}"
                     )
                 ]
             )
@@ -420,18 +400,13 @@ async def quality_selected(
 
     await callback.answer()
 
-    height = selected[
-        "height"
-    ]
+    height = selected["height"]
+    url = selected["url"]
 
     await callback.message.edit_text(
         f"⏳ Preparing {height}p video...\n\n"
         "⚡ Downloading..."
     )
-
-    url = selected[
-        "url"
-    ]
 
     temp_dir = Path(
         tempfile.mkdtemp(
@@ -450,75 +425,132 @@ async def quality_selected(
         # DOWNLOAD
         # =================================================
 
-        format_selector = (
-            f"bestvideo[height<={height}]"
-            "+bestaudio/"
-            f"best[height<={height}]"
-        )
+        # IMPORTANT:
+        # First try a normal combined format.
+        # If unavailable, try separate video + audio.
+        # Finally use the best available format.
+        format_selectors = [
 
-        # First try mweb with PO Token Provider
-        # Then fallback clients if needed.
+            # Best combined format up to requested height
+            f"best[height<={height}][ext=mp4]",
+
+            f"best[height<={height}]",
+
+            # Separate video + audio
+            f"bestvideo[height<={height}]+bestaudio",
+
+            f"bestvideo[height<={height}]+bestaudio/best",
+
+            # Final fallback
+            "best",
+        ]
+
         download_success = False
         last_download_error = None
 
         for clients in YOUTUBE_CLIENTS:
 
-            options = {
-                "format": format_selector,
+            for format_selector in format_selectors:
 
-                "outtmpl": output_template,
+                options = {
+                    "format": format_selector,
 
-                "merge_output_format": "mp4",
+                    "outtmpl": output_template,
 
-                "noplaylist": True,
+                    "merge_output_format": "mp4",
 
-                "quiet": True,
+                    "noplaylist": True,
 
-                "no_warnings": True,
+                    "quiet": True,
 
-                "ffmpeg_location": FFMPEG_PATH,
+                    "no_warnings": True,
 
-                "retries": 3,
+                    "ffmpeg_location": FFMPEG_PATH,
 
-                "fragment_retries": 3,
+                    "retries": 3,
 
-                "continuedl": True,
+                    "fragment_retries": 3,
 
-                "concurrent_fragment_downloads": 4,
+                    "continuedl": True,
 
-                "extractor_args": youtube_extractor_args(
-                    clients
-                ),
-            }
+                    "concurrent_fragment_downloads": 4,
 
-            try:
+                    "extractor_args": youtube_extractor_args(
+                        clients
+                    ),
 
-                print(
-                    f"Trying download client: {clients}"
-                )
+                    "socket_timeout": 30,
 
-                await asyncio.to_thread(
-                    download_video,
-                    url,
-                    options
-                )
+                    "http_chunk_size": 10 * 1024 * 1024,
+                }
 
-                download_success = True
+                try:
 
-                print(
-                    f"Download successful using {clients}"
-                )
+                    print(
+                        "----------------------------------------"
+                    )
 
+                    print(
+                        f"Trying download client: {clients}"
+                    )
+
+                    print(
+                        f"Trying format: {format_selector}"
+                    )
+
+                    await asyncio.to_thread(
+                        download_video,
+                        url,
+                        options
+                    )
+
+                    # Make sure a file actually exists
+                    downloaded_files = [
+                        f for f in temp_dir.glob("*")
+                        if f.is_file()
+                        and f.suffix.lower() in {
+                            ".mp4",
+                            ".mkv",
+                            ".webm",
+                            ".mov",
+                            ".m4a"
+                        }
+                    ]
+
+                    if downloaded_files:
+
+                        download_success = True
+
+                        print(
+                            f"Download successful: "
+                            f"{clients} / "
+                            f"{format_selector}"
+                        )
+
+                        break
+
+                except Exception as e:
+
+                    last_download_error = e
+
+                    print(
+                        f"DOWNLOAD ERROR | "
+                        f"client={clients} | "
+                        f"format={format_selector} | "
+                        f"error={repr(e)}"
+                    )
+
+                    # Remove partial files before next attempt
+                    for partial in temp_dir.glob("*"):
+
+                        try:
+                            if partial.is_file():
+                                partial.unlink()
+                        except Exception:
+                            pass
+
+            if download_success:
                 break
-
-            except Exception as e:
-
-                last_download_error = e
-
-                print(
-                    f"DOWNLOAD ERROR with client "
-                    f"{clients}: {repr(e)}"
-                )
 
         if not download_success:
 
@@ -526,7 +558,7 @@ async def quality_selected(
                 raise last_download_error
 
             raise RuntimeError(
-                "All YouTube download clients failed"
+                "All download formats and clients failed"
             )
 
         # =================================================
@@ -539,22 +571,38 @@ async def quality_selected(
 
         video_file = None
 
-        for file in files:
+        # Prefer mp4
+        mp4_files = [
+            f for f in files
+            if f.is_file()
+            and f.suffix.lower() == ".mp4"
+        ]
 
-            if (
-                file.is_file()
-                and file.suffix.lower()
-                in {
-                    ".mp4",
+        if mp4_files:
+
+            video_file = max(
+                mp4_files,
+                key=lambda f: f.stat().st_size
+            )
+
+        else:
+
+            valid_files = [
+                f for f in files
+                if f.is_file()
+                and f.suffix.lower() in {
                     ".mkv",
                     ".webm",
                     ".mov"
                 }
-            ):
+            ]
 
-                video_file = file
+            if valid_files:
 
-                break
+                video_file = max(
+                    valid_files,
+                    key=lambda f: f.stat().st_size
+                )
 
         if not video_file:
 
@@ -586,8 +634,16 @@ async def quality_selected(
     except Exception as e:
 
         print(
+            "========================================"
+        )
+
+        print(
             "DOWNLOAD ERROR:",
             repr(e)
+        )
+
+        print(
+            "========================================"
         )
 
         await callback.message.edit_text(
@@ -604,7 +660,8 @@ async def quality_selected(
         for file in temp_dir.glob("*"):
 
             try:
-                file.unlink()
+                if file.is_file():
+                    file.unlink()
 
             except Exception:
                 pass
@@ -653,6 +710,11 @@ async def main():
     print(
         "PO Token Provider:",
         POT_PROVIDER_URL
+    )
+
+    print(
+        "FFmpeg:",
+        FFMPEG_PATH
     )
 
     await dp.start_polling(
