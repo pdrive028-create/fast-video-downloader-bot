@@ -27,32 +27,54 @@ if not TOKEN:
     raise RuntimeError("BOT_TOKEN is not set")
 
 
-# Railway private connection to bgutil provider
+# =========================================================
+# BGUTIL PO TOKEN PROVIDER
+# =========================================================
+
 POT_PROVIDER_URL = os.getenv(
     "POT_PROVIDER_URL",
     "http://bgutil-ytdlp-pot-provider:4416"
 )
 
 
-# Railway private connection to Telegram Local Bot API
+# =========================================================
+# TELEGRAM LOCAL BOT API
+# =========================================================
+
 LOCAL_BOT_API_URL = os.getenv(
     "LOCAL_BOT_API_URL",
     ""
 )
 
 
+# =========================================================
+# FFMPEG
+# =========================================================
+
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 
 # =========================================================
-# TELEGRAM BOT
+# TELEGRAM BOT SETUP
 # =========================================================
 
 if LOCAL_BOT_API_URL:
 
     print(
-        "Using Telegram Local Bot API:",
+        "========================================"
+    )
+
+    print(
+        "Using Telegram Local Bot API"
+    )
+
+    print(
+        "Local API:",
         LOCAL_BOT_API_URL
+    )
+
+    print(
+        "========================================"
     )
 
     session = AiohttpSession(
@@ -70,7 +92,15 @@ if LOCAL_BOT_API_URL:
 else:
 
     print(
-        "Using official Telegram Cloud Bot API"
+        "========================================"
+    )
+
+    print(
+        "Using Telegram Cloud Bot API"
+    )
+
+    print(
+        "========================================"
     )
 
     bot = Bot(TOKEN)
@@ -89,16 +119,20 @@ user_formats = {}
 # =========================================================
 # YOUTUBE CLIENTS
 # =========================================================
+#
+# mweb is used with the bgutil PO Token provider.
+#
+# This is important because YouTube may require
+# PO Tokens for some player clients.
+# =========================================================
 
 YOUTUBE_CLIENTS = [
-    ["android_vr"],
-    ["tv"],
-    ["web_embedded"],
+    ["mweb"],
 ]
 
 
 # =========================================================
-# EXTRACTOR ARGS
+# YOUTUBE EXTRACTOR ARGS
 # =========================================================
 
 def youtube_extractor_args(clients):
@@ -115,7 +149,7 @@ def youtube_extractor_args(clients):
 
 
 # =========================================================
-# START
+# START COMMAND
 # =========================================================
 
 @dp.message(CommandStart())
@@ -129,7 +163,7 @@ async def start(message: types.Message):
 
 
 # =========================================================
-# GET VIDEO INFO
+# GET VIDEO INFORMATION
 # =========================================================
 
 def get_video_info(url: str):
@@ -140,15 +174,23 @@ def get_video_info(url: str):
 
         options = {
             "quiet": True,
+
             "no_warnings": True,
+
             "noplaylist": True,
+
             "skip_download": True,
+
             "ffmpeg_location": FFMPEG_PATH,
+
             "extractor_args": youtube_extractor_args(
                 clients
             ),
+
             "retries": 3,
+
             "fragment_retries": 3,
+
             "socket_timeout": 30,
         }
 
@@ -162,7 +204,13 @@ def get_video_info(url: str):
                 f"Trying info client: {clients}"
             )
 
-            with yt_dlp.YoutubeDL(options) as ydl:
+            print(
+                f"URL: {url}"
+            )
+
+            with yt_dlp.YoutubeDL(
+                options
+            ) as ydl:
 
                 info = ydl.extract_info(
                     url,
@@ -175,11 +223,23 @@ def get_video_info(url: str):
                     f"INFO SUCCESS: {clients}"
                 )
 
+                print(
+                    "Title:",
+                    info.get(
+                        "title",
+                        "Unknown"
+                    )
+                )
+
                 return info
 
         except Exception as e:
 
             last_error = e
+
+            print(
+                "----------------------------------------"
+            )
 
             print(
                 f"INFO ERROR: {clients}"
@@ -250,18 +310,27 @@ def build_quality_options(info):
 
         available_formats.append(
             {
-                "format_id": f.get("format_id"),
+                "format_id": f.get(
+                    "format_id"
+                ),
+
                 "height": height,
+
                 "size": filesize,
+
                 "vcodec": vcodec,
+
                 "acodec": acodec,
-                "ext": f.get("ext"),
+
+                "ext": f.get(
+                    "ext"
+                ),
             }
         )
 
 
     # =====================================================
-    # BUILD ONE BUTTON PER AVAILABLE TARGET QUALITY
+    # BUILD QUALITY BUTTONS
     # =====================================================
 
     for target in target_heights:
@@ -278,12 +347,15 @@ def build_quality_options(info):
         candidates.sort(
             key=lambda x: (
                 x["height"],
+
                 1 if (
                     x["acodec"]
                     and x["acodec"] != "none"
                 ) else 0,
+
                 x["size"],
             ),
+
             reverse=True
         )
 
@@ -295,7 +367,9 @@ def build_quality_options(info):
         ):
             continue
 
-        result.append(best)
+        result.append(
+            best
+        )
 
     return result
 
@@ -326,7 +400,7 @@ def size_text(size):
 
 
 # =========================================================
-# USER SENDS LINK
+# USER SENDS VIDEO LINK
 # =========================================================
 
 @dp.message(F.text)
@@ -337,8 +411,13 @@ async def handle_message(
     text = message.text.strip()
 
     if not (
-        text.startswith("http://")
-        or text.startswith("https://")
+        text.startswith(
+            "http://"
+        )
+        or
+        text.startswith(
+            "https://"
+        )
     ):
 
         await message.answer(
@@ -376,8 +455,8 @@ async def handle_message(
         if not formats:
 
             await status.edit_text(
-                "❌ No downloadable video qualities "
-                "were found."
+                "❌ No downloadable video "
+                "qualities were found."
             )
 
             return
@@ -391,14 +470,24 @@ async def handle_message(
         buttons = []
 
 
-        for index, fmt in enumerate(formats):
+        for index, fmt in enumerate(
+            formats
+        ):
 
             key = str(index)
 
+
             user_formats[user_id][key] = {
+
                 "url": text,
-                "height": fmt["height"],
-                "format_id": fmt["format_id"],
+
+                "height": fmt[
+                    "height"
+                ],
+
+                "format_id": fmt[
+                    "format_id"
+                ],
             }
 
 
@@ -413,6 +502,7 @@ async def handle_message(
                 [
                     InlineKeyboardButton(
                         text=label,
+
                         callback_data=(
                             f"quality:{key}"
                         )
@@ -429,6 +519,7 @@ async def handle_message(
         await status.edit_text(
             f"🎬 {title}\n\n"
             "📥 Select video quality:",
+
             reply_markup=keyboard
         )
 
@@ -463,7 +554,9 @@ async def handle_message(
 # =========================================================
 
 @dp.callback_query(
-    F.data.startswith("quality:")
+    F.data.startswith(
+        "quality:"
+    )
 )
 async def quality_selected(
     callback: types.CallbackQuery
@@ -508,9 +601,13 @@ async def quality_selected(
     await callback.answer()
 
 
-    url = selected["url"]
+    url = selected[
+        "url"
+    ]
 
-    height = selected["height"]
+    height = selected[
+        "height"
+    ]
 
 
     await callback.message.edit_text(
@@ -540,14 +637,19 @@ async def quality_selected(
 
         format_selectors = [
 
+            # Best MP4 under selected height
             f"best[height<={height}][ext=mp4]",
 
+            # Best combined format
             f"best[height<={height}]",
 
+            # Best video + audio
             f"bestvideo[height<={height}]+bestaudio",
 
+            # Video + audio fallback
             f"bestvideo[height<={height}]+bestaudio/best",
 
+            # Final fallback
             "best",
         ]
 
@@ -558,7 +660,7 @@ async def quality_selected(
 
 
         # =================================================
-        # TRY EACH CLIENT
+        # TRY YOUTUBE CLIENTS
         # =================================================
 
         for clients in YOUTUBE_CLIENTS:
@@ -567,29 +669,41 @@ async def quality_selected(
 
                 options = {
 
-                    "format": format_selector,
+                    "format":
+                        format_selector,
 
-                    "outtmpl": output_template,
+                    "outtmpl":
+                        output_template,
 
-                    "merge_output_format": "mp4",
+                    "merge_output_format":
+                        "mp4",
 
-                    "noplaylist": True,
+                    "noplaylist":
+                        True,
 
-                    "quiet": True,
+                    "quiet":
+                        True,
 
-                    "no_warnings": True,
+                    "no_warnings":
+                        True,
 
-                    "ffmpeg_location": FFMPEG_PATH,
+                    "ffmpeg_location":
+                        FFMPEG_PATH,
 
-                    "retries": 3,
+                    "retries":
+                        3,
 
-                    "fragment_retries": 3,
+                    "fragment_retries":
+                        3,
 
-                    "continuedl": True,
+                    "continuedl":
+                        True,
 
-                    "concurrent_fragment_downloads": 4,
+                    "concurrent_fragment_downloads":
+                        4,
 
-                    "socket_timeout": 30,
+                    "socket_timeout":
+                        30,
 
                     "extractor_args":
                         youtube_extractor_args(
@@ -605,17 +719,21 @@ async def quality_selected(
                     )
 
                     print(
-                        f"DOWNLOAD CLIENT: {clients}"
+                        f"DOWNLOAD CLIENT: "
+                        f"{clients}"
                     )
 
                     print(
-                        f"FORMAT: {format_selector}"
+                        f"FORMAT: "
+                        f"{format_selector}"
                     )
 
 
                     await asyncio.to_thread(
                         download_video,
+
                         url,
+
                         options
                     )
 
@@ -644,6 +762,7 @@ async def quality_selected(
 
                         download_success = True
 
+
                         print(
                             "DOWNLOAD SUCCESS"
                         )
@@ -653,7 +772,8 @@ async def quality_selected(
                         )
 
                         print(
-                            f"Format: {format_selector}"
+                            f"Format: "
+                            f"{format_selector}"
                         )
 
                         break
@@ -662,6 +782,7 @@ async def quality_selected(
                 except Exception as e:
 
                     last_download_error = e
+
 
                     print(
                         "DOWNLOAD ATTEMPT FAILED"
@@ -672,7 +793,8 @@ async def quality_selected(
                     )
 
                     print(
-                        f"Format: {format_selector}"
+                        f"Format: "
+                        f"{format_selector}"
                     )
 
                     print(
@@ -700,7 +822,7 @@ async def quality_selected(
 
 
         # =================================================
-        # ALL DOWNLOADS FAILED
+        # DOWNLOAD FAILED
         # =================================================
 
         if not download_success:
@@ -741,15 +863,20 @@ async def quality_selected(
         if not video_files:
 
             raise RuntimeError(
-                "Downloaded video file not found"
+                "Downloaded video file "
+                "not found"
             )
 
 
-        # Prefer MP4
+        # =================================================
+        # PREFER MP4
+        # =================================================
+
         mp4_files = [
             f
             for f in video_files
-            if f.suffix.lower() == ".mp4"
+            if f.suffix.lower()
+            == ".mp4"
         ]
 
 
@@ -757,14 +884,18 @@ async def quality_selected(
 
             video_file = max(
                 mp4_files,
-                key=lambda f: f.stat().st_size
+
+                key=lambda f:
+                f.stat().st_size
             )
 
         else:
 
             video_file = max(
                 video_files,
-                key=lambda f: f.stat().st_size
+
+                key=lambda f:
+                f.stat().st_size
             )
 
 
@@ -778,10 +909,39 @@ async def quality_selected(
         )
 
 
+        file_size_mb = (
+            video_file.stat().st_size
+            / (1024 * 1024)
+        )
+
+
+        print(
+            "========================================"
+        )
+
+        print(
+            "TELEGRAM UPLOAD"
+        )
+
+        print(
+            "File:",
+            video_file
+        )
+
+        print(
+            f"Size: {file_size_mb:.2f} MB"
+        )
+
+        print(
+            "========================================"
+        )
+
+
         await callback.message.answer_document(
             FSInputFile(
                 video_file
             ),
+
             caption=(
                 f"🎬 {height}p\n"
                 "⚡ Fast Video Downloader"
@@ -813,7 +973,8 @@ async def quality_selected(
 
         await callback.message.edit_text(
             "❌ Download failed.\n\n"
-            "Try another quality or another video link."
+            "Try another quality or another "
+            "video link."
         )
 
 
@@ -877,54 +1038,3 @@ async def main():
 
     print(
         "========================================"
-    )
-
-    print(
-        "Video Downloader 4K"
-    )
-
-    print(
-        "Bot started..."
-    )
-
-    print(
-        "Telegram Local API:",
-        LOCAL_BOT_API_URL
-        if LOCAL_BOT_API_URL
-        else "DISABLED"
-    )
-
-    print(
-        "PO Token Provider:",
-        POT_PROVIDER_URL
-    )
-
-    print(
-        "FFmpeg:",
-        FFMPEG_PATH
-    )
-
-    print(
-        "YouTube Clients:",
-        YOUTUBE_CLIENTS
-    )
-
-    print(
-        "========================================"
-    )
-
-
-    await dp.start_polling(
-        bot
-    )
-
-
-# =========================================================
-# RUN
-# =========================================================
-
-if __name__ == "__main__":
-
-    asyncio.run(
-        main()
-    )
