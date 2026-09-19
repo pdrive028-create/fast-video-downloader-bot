@@ -1,6 +1,8 @@
 import os
 import asyncio
 import tempfile
+import subprocess
+import re
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, types, F
@@ -55,7 +57,7 @@ FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 
 # =========================================================
-# TELEGRAM BOT SETUP
+# TELEGRAM BOT
 # =========================================================
 
 if LOCAL_BOT_API_URL:
@@ -97,14 +99,18 @@ user_formats = {}
 
 
 # =========================================================
-# YOUTUBE CLIENTS
+# YOUTUBE CLIENT ORDER
+# =========================================================
+#
+# Try clients that currently don't require GVS PO token
+# before mweb. mweb remains as a fallback.
 # =========================================================
 
 YOUTUBE_CLIENTS = [
-    ["mweb"],
     ["android_vr"],
     ["tv"],
     ["web_embedded"],
+    ["mweb"],
 ]
 
 
@@ -126,11 +132,13 @@ def youtube_extractor_args(clients):
 
 
 # =========================================================
-# START
+# START COMMAND
 # =========================================================
 
 @dp.message(CommandStart())
-async def start(message: types.Message):
+async def start(
+    message: types.Message
+):
 
     await message.answer(
         "🎬 Fast Video Downloader\n\n"
@@ -140,25 +148,35 @@ async def start(message: types.Message):
 
 
 # =========================================================
-# GET VIDEO INFO
+# GET VIDEO INFORMATION
 # =========================================================
 
-def get_video_info(url: str):
+def get_video_info(
+    url: str
+):
 
     successful_infos = []
     last_error = None
 
     # -----------------------------------------------------
-    # CHECK ALL CLIENTS
+    # TRY EVERY CLIENT
     # -----------------------------------------------------
 
     for clients in YOUTUBE_CLIENTS:
 
         options = {
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "skip_download": True,
+
+            "quiet":
+                True,
+
+            "no_warnings":
+                True,
+
+            "noplaylist":
+                True,
+
+            "skip_download":
+                True,
 
             "ffmpeg_location":
                 FFMPEG_PATH,
@@ -168,19 +186,31 @@ def get_video_info(url: str):
                     clients
                 ),
 
-            "retries": 3,
-            "fragment_retries": 3,
-            "socket_timeout": 30,
+            "retries":
+                3,
 
-            "ignoreerrors": False,
+            "fragment_retries":
+                3,
+
+            "socket_timeout":
+                30,
+
+            "ignoreerrors":
+                False,
         }
 
         try:
 
             print("========================================")
+
             print(
                 "INFO CLIENT:",
                 clients
+            )
+
+            print(
+                "INFO URL:",
+                url
             )
 
             with yt_dlp.YoutubeDL(
@@ -251,10 +281,18 @@ def get_video_info(url: str):
             )
 
             successful_infos.append({
-                "info": info,
-                "client": clients,
-                "max_height": max_height,
-                "video_count": video_count,
+
+                "info":
+                    info,
+
+                "client":
+                    clients,
+
+                "max_height":
+                    max_height,
+
+                "video_count":
+                    video_count,
             })
 
         except Exception as e:
@@ -262,6 +300,7 @@ def get_video_info(url: str):
             last_error = e
 
             print("----------------------------------------")
+
             print(
                 "INFO ERROR:",
                 clients
@@ -272,12 +311,13 @@ def get_video_info(url: str):
             )
 
     # -----------------------------------------------------
-    # NO SUCCESS
+    # NOTHING WORKED
     # -----------------------------------------------------
 
     if not successful_infos:
 
         if last_error:
+
             raise last_error
 
         raise RuntimeError(
@@ -285,7 +325,7 @@ def get_video_info(url: str):
         )
 
     # -----------------------------------------------------
-    # SORT BEST CLIENT
+    # SELECT RICHEST INFO
     # -----------------------------------------------------
 
     successful_infos.sort(
@@ -296,13 +336,16 @@ def get_video_info(url: str):
         reverse=True
     )
 
-    best_info = successful_infos[0]["info"]
+    best_info = dict(
+        successful_infos[0]["info"]
+    )
 
     # -----------------------------------------------------
-    # MERGE FORMATS
+    # MERGE ALL FORMATS
     # -----------------------------------------------------
 
     merged_formats = []
+
     seen = set()
 
     for item in successful_infos:
@@ -310,19 +353,54 @@ def get_video_info(url: str):
         info = item["info"]
         source_client = item["client"]
 
-        for f in info.get(
+        for original_format in info.get(
             "formats",
             []
         ):
 
+            format_copy = dict(
+                original_format
+            )
+
+            # Keep the client that produced this format.
+            format_copy["_source_client"] = (
+                source_client
+            )
+
             signature = (
-                str(f.get("format_id")),
-                f.get("height"),
-                f.get("width"),
-                f.get("vcodec"),
-                f.get("acodec"),
-                f.get("ext"),
-                tuple(source_client),
+                str(
+                    format_copy.get(
+                        "format_id"
+                    )
+                ),
+
+                format_copy.get(
+                    "height"
+                ),
+
+                format_copy.get(
+                    "width"
+                ),
+
+                format_copy.get(
+                    "vcodec"
+                ),
+
+                format_copy.get(
+                    "acodec"
+                ),
+
+                format_copy.get(
+                    "ext"
+                ),
+
+                format_copy.get(
+                    "protocol"
+                ),
+
+                tuple(
+                    source_client
+                ),
             )
 
             if signature in seen:
@@ -330,20 +408,14 @@ def get_video_info(url: str):
 
             seen.add(signature)
 
-            new_format = dict(f)
-
-            new_format["_source_client"] = (
-                source_client
-            )
-
             merged_formats.append(
-                new_format
+                format_copy
             )
 
     best_info["formats"] = merged_formats
 
     # -----------------------------------------------------
-    # FINAL LOG
+    # FINAL INFO
     # -----------------------------------------------------
 
     final_heights = sorted({
@@ -353,6 +425,7 @@ def get_video_info(url: str):
     })
 
     print("========================================")
+
     print(
         "FINAL AVAILABLE HEIGHTS:",
         final_heights
@@ -372,7 +445,9 @@ def get_video_info(url: str):
 # QUALITY OPTIONS
 # =========================================================
 
-def build_quality_options(info):
+def build_quality_options(
+    info
+):
 
     formats = info.get(
         "formats",
@@ -389,18 +464,24 @@ def build_quality_options(info):
     ]
 
     video_formats = []
+
     audio_formats = []
 
     # -----------------------------------------------------
-    # COLLECT VIDEO/AUDIO
+    # COLLECT VIDEO + AUDIO
     # -----------------------------------------------------
 
     for f in formats:
 
         height = f.get("height")
-        width = f.get("width")
+
+        width = (
+            f.get("width")
+            or 0
+        )
 
         vcodec = f.get("vcodec")
+
         acodec = f.get("acodec")
 
         filesize = (
@@ -410,6 +491,7 @@ def build_quality_options(info):
         )
 
         tbr = f.get("tbr") or 0
+
         fps = f.get("fps") or 0
 
         ext = f.get("ext")
@@ -430,6 +512,7 @@ def build_quality_options(info):
         ):
 
             video_formats.append({
+
                 "format_id":
                     f.get("format_id"),
 
@@ -437,7 +520,7 @@ def build_quality_options(info):
                     height,
 
                 "width":
-                    width or 0,
+                    width,
 
                 "size":
                     filesize,
@@ -462,7 +545,7 @@ def build_quality_options(info):
             })
 
         # -------------------------------------------------
-        # AUDIO FORMAT
+        # AUDIO ONLY
         # -------------------------------------------------
 
         if (
@@ -475,6 +558,7 @@ def build_quality_options(info):
         ):
 
             audio_formats.append({
+
                 "format_id":
                     f.get("format_id"),
 
@@ -489,10 +573,10 @@ def build_quality_options(info):
             })
 
     # -----------------------------------------------------
-    # BUILD AUDIO SIZE ESTIMATE PER CLIENT
+    # BEST AUDIO SIZE PER CLIENT
     # -----------------------------------------------------
 
-    best_audio_size_by_client = {}
+    best_audio_by_client = {}
 
     for audio in audio_formats:
 
@@ -501,7 +585,7 @@ def build_quality_options(info):
         )
 
         current = (
-            best_audio_size_by_client
+            best_audio_by_client
             .get(client_key)
         )
 
@@ -517,12 +601,12 @@ def build_quality_options(info):
             )
         ):
 
-            best_audio_size_by_client[
+            best_audio_by_client[
                 client_key
             ] = audio
 
     # -----------------------------------------------------
-    # BUILD QUALITY BUTTONS
+    # BUILD ONE BUTTON PER RESOLUTION
     # -----------------------------------------------------
 
     result = []
@@ -538,6 +622,10 @@ def build_quality_options(info):
         if not candidates:
             continue
 
+        # Highest actual resolution first.
+        # Then bitrate.
+        # Then MP4 preference.
+        # Then known file size.
         candidates.sort(
             key=lambda x: (
                 x["height"],
@@ -550,26 +638,19 @@ def build_quality_options(info):
 
         best = candidates[0]
 
-        # -------------------------------------------------
-        # NO DUPLICATE HEIGHT
-        # -------------------------------------------------
-
+        # Don't duplicate same resolution.
         if any(
             x["height"] == best["height"]
             for x in result
         ):
             continue
 
-        # -------------------------------------------------
-        # AUDIO SIZE ESTIMATE FROM SAME CLIENT
-        # -------------------------------------------------
-
         client_key = str(
             best["source_client"]
         )
 
         audio = (
-            best_audio_size_by_client
+            best_audio_by_client
             .get(client_key)
         )
 
@@ -579,39 +660,24 @@ def build_quality_options(info):
             else 0
         )
 
-        total_size = (
+        estimated_size = (
             best["size"]
             + audio_size
         )
 
         result.append({
 
-            "format_id":
-                best["format_id"],
-
             "height":
                 best["height"],
 
-            "size":
-                total_size,
-
-            "vcodec":
-                best["vcodec"],
-
-            "acodec":
-                best["acodec"],
-
-            "ext":
-                best["ext"],
-
-            "tbr":
-                best["tbr"],
-
-            "fps":
-                best["fps"],
+            "format_id":
+                best["format_id"],
 
             "source_client":
                 best["source_client"],
+
+            "size":
+                estimated_size,
         })
 
     # -----------------------------------------------------
@@ -625,17 +691,22 @@ def build_quality_options(info):
     )
 
     print("========================================")
-    print("QUALITY BUTTONS")
+
+    print(
+        "QUALITY OPTIONS:"
+    )
 
     for item in result:
 
         print(
             item["height"],
             "p |",
-            size_text(item["size"]),
-            "| format=",
+            size_text(
+                item["size"]
+            ),
+            "| format:",
             item["format_id"],
-            "| client=",
+            "| client:",
             item["source_client"]
         )
 
@@ -648,9 +719,12 @@ def build_quality_options(info):
 # SIZE TEXT
 # =========================================================
 
-def size_text(size):
+def size_text(
+    size
+):
 
     if not size:
+
         return "Size unknown"
 
     mb = (
@@ -680,6 +754,10 @@ async def handle_message(
 
     text = message.text.strip()
 
+    # -----------------------------------------------------
+    # CHECK URL
+    # -----------------------------------------------------
+
     if not (
         text.startswith("http://")
         or text.startswith("https://")
@@ -690,6 +768,10 @@ async def handle_message(
         )
 
         return
+
+    # -----------------------------------------------------
+    # ANALYZING
+    # -----------------------------------------------------
 
     status = await message.answer(
         "🔍 Analyzing video...\n\n"
@@ -721,14 +803,18 @@ async def handle_message(
 
             return
 
-        user_id = message.from_user.id
+        user_id = (
+            message.from_user.id
+        )
 
-        user_formats[user_id] = {}
+        user_formats[
+            user_id
+        ] = {}
 
         buttons = []
 
         # -------------------------------------------------
-        # CREATE QUALITY BUTTONS
+        # QUALITY BUTTONS
         # -------------------------------------------------
 
         for index, fmt in enumerate(
@@ -737,7 +823,9 @@ async def handle_message(
 
             key = str(index)
 
-            user_formats[user_id][key] = {
+            user_formats[
+                user_id
+            ][key] = {
 
                 "url":
                     text,
@@ -745,15 +833,14 @@ async def handle_message(
                 "height":
                     fmt["height"],
 
-                "format_id":
-                    fmt["format_id"],
-
                 "source_client":
                     fmt["source_client"],
             }
 
             buttons.append([
+
                 InlineKeyboardButton(
+
                     text=(
                         f"{fmt['height']}p"
                         f" • "
@@ -771,6 +858,7 @@ async def handle_message(
         )
 
         await status.edit_text(
+
             f"🎬 {title}\n\n"
             "📥 Select video quality:",
 
@@ -779,15 +867,26 @@ async def handle_message(
 
     except Exception as e:
 
-        print("========================================")
-        print("INFO FINAL ERROR:")
-        print(repr(e))
-        print("========================================")
+        print(
+            "========================================"
+        )
+
+        print(
+            "INFO FINAL ERROR:"
+        )
+
+        print(
+            repr(e)
+        )
+
+        print(
+            "========================================"
+        )
 
         await status.edit_text(
             "❌ Could not analyze this link.\n\n"
             "Please try another video link."
-        )
+                )
 # =========================================================
 # QUALITY SELECTED
 # =========================================================
@@ -799,7 +898,9 @@ async def quality_selected(
     callback: types.CallbackQuery
 ):
 
-    user_id = callback.from_user.id
+    user_id = (
+        callback.from_user.id
+    )
 
     key = callback.data.split(
         ":",
@@ -807,7 +908,7 @@ async def quality_selected(
     )[1]
 
     # -----------------------------------------------------
-    # CHECK SELECTION
+    # CHECK USER SELECTION
     # -----------------------------------------------------
 
     if user_id not in user_formats:
@@ -820,9 +921,11 @@ async def quality_selected(
 
         return
 
-    selected = user_formats[
-        user_id
-    ].get(key)
+    selected = (
+        user_formats[
+            user_id
+        ].get(key)
+    )
 
     if not selected:
 
@@ -837,13 +940,16 @@ async def quality_selected(
     await callback.answer()
 
     url = selected["url"]
+
     height = selected["height"]
-    format_id = selected["format_id"]
-    source_client = selected["source_client"]
+
+    source_client = selected[
+        "source_client"
+    ]
 
     await callback.message.edit_text(
         f"⏳ Preparing {height}p video...\n\n"
-        "⚡ Downloading..."
+        "⚡ Downloading video + audio..."
     )
 
     # -----------------------------------------------------
@@ -864,113 +970,375 @@ async def quality_selected(
     try:
 
         # =================================================
+        # CLIENT ORDER
+        #
+        # Start with the client that produced the
+        # selected resolution.
+        # =================================================
+
+        download_clients = []
+
+        if source_client:
+
+            download_clients.append(
+                source_client
+            )
+
+        for client in YOUTUBE_CLIENTS:
+
+            if client not in download_clients:
+
+                download_clients.append(
+                    client
+                )
+
+        # =================================================
+        # EXACT RESOLUTION SELECTORS
+        #
         # IMPORTANT:
-        # USE EXACT SELECTED FORMAT ID
-        #
-        # SAME CLIENT THAT PROVIDED THE FORMAT
+        # height=1440 means we will NEVER silently accept
+        # 360p/720p for the 1440p button.
         # =================================================
 
-        print("========================================")
-        print("SELECTED QUALITY")
-        print("Height:", f"{height}p")
-        print("Format ID:", format_id)
-        print("Source Client:", source_client)
-        print("========================================")
+        format_selectors = [
 
-        # -------------------------------------------------
-        # EXACT FORMAT + BEST AUDIO
-        #
-        # First choice:
-        # exact selected video + best audio
-        #
-        # Second choice:
-        # exact selected format alone
-        # -------------------------------------------------
+            # Best exact-height video + best audio.
+            f"bestvideo[height={height}]+bestaudio/"
+            f"best[height={height}]",
 
-        format_selector = (
-            f"{format_id}+bestaudio/"
-            f"{format_id}"
-        )
+            # Exact-height combined format.
+            f"best[height={height}]",
 
-        options = {
+            # Exact-height video only as last fallback.
+            f"bestvideo[height={height}]",
+        ]
 
-            "format":
-                format_selector,
+        download_success = False
 
-            "outtmpl":
-                output_template,
-
-            "merge_output_format":
-                "mp4",
-
-            "noplaylist":
-                True,
-
-            # We need useful errors in Railway logs.
-            "quiet":
-                False,
-
-            "no_warnings":
-                False,
-
-            "ffmpeg_location":
-                FFMPEG_PATH,
-
-            "retries":
-                3,
-
-            "fragment_retries":
-                3,
-
-            "continuedl":
-                True,
-
-            "concurrent_fragment_downloads":
-                4,
-
-            "socket_timeout":
-                30,
-
-            "extractor_args":
-                youtube_extractor_args(
-                    source_client
-                ),
-
-            # Keep temporary/intermediate files
-            # only until yt-dlp finishes merging.
-            "keepvideo":
-                False,
-        }
+        last_download_error = None
 
         # =================================================
-        # START DOWNLOAD
+        # DOWNLOAD
         # =================================================
 
-        print("========================================")
-        print("START EXACT DOWNLOAD")
-        print("URL:", url)
-        print(
-            "Format selector:",
-            format_selector
-        )
-        print(
-            "Client:",
-            source_client
-        )
-        print("========================================")
+        for clients in download_clients:
 
-        await asyncio.to_thread(
-            download_video,
-            url,
-            options
-        )
+            if download_success:
+                break
 
-        print("========================================")
-        print("YTDLP DOWNLOAD FUNCTION COMPLETED")
-        print("========================================")
+            for format_selector in format_selectors:
+
+                # -------------------------------------------------
+                # CLEAN PARTIAL FILES
+                # -------------------------------------------------
+
+                for partial in temp_dir.glob("*"):
+
+                    try:
+
+                        if partial.is_file():
+
+                            partial.unlink()
+
+                    except Exception:
+                        pass
+
+                options = {
+
+                    "format":
+                        format_selector,
+
+                    "outtmpl":
+                        output_template,
+
+                    "merge_output_format":
+                        "mp4",
+
+                    "noplaylist":
+                        True,
+
+                    "quiet":
+                        False,
+
+                    "no_warnings":
+                        False,
+
+                    "ffmpeg_location":
+                        FFMPEG_PATH,
+
+                    "retries":
+                        3,
+
+                    "fragment_retries":
+                        3,
+
+                    "continuedl":
+                        True,
+
+                    "concurrent_fragment_downloads":
+                        2,
+
+                    "socket_timeout":
+                        30,
+
+                    "extractor_args":
+                        youtube_extractor_args(
+                            clients
+                        ),
+
+                    # Do not keep source video after
+                    # successful FFmpeg merge.
+                    "keepvideo":
+                        False,
+                }
+
+                try:
+
+                    print(
+                        "========================================"
+                    )
+
+                    print(
+                        "DOWNLOAD ATTEMPT"
+                    )
+
+                    print(
+                        "Requested:",
+                        f"{height}p"
+                    )
+
+                    print(
+                        "Client:",
+                        clients
+                    )
+
+                    print(
+                        "Format:",
+                        format_selector
+                    )
+
+                    print(
+                        "========================================"
+                    )
+
+                    # -------------------------------------------------
+                    # ACTUAL DOWNLOAD
+                    # -------------------------------------------------
+
+                    await asyncio.to_thread(
+                        download_video,
+                        url,
+                        options
+                    )
+
+                    print(
+                        "========================================"
+                    )
+
+                    print(
+                        "YTDLP DOWNLOAD COMPLETED"
+                    )
+
+                    print(
+                        "========================================"
+                    )
+
+                    # -------------------------------------------------
+                    # FIND FILES
+                    # -------------------------------------------------
+
+                    files = [
+                        f
+                        for f in temp_dir.glob("*")
+                        if f.is_file()
+                    ]
+
+                    print(
+                        "Files created:",
+                        [
+                            f.name
+                            for f in files
+                        ]
+                    )
+
+                    video_files = [
+                        f
+                        for f in files
+                        if f.suffix.lower()
+                        in {
+                            ".mp4",
+                            ".mkv",
+                            ".webm",
+                            ".mov",
+                        }
+                    ]
+
+                    if not video_files:
+
+                        raise RuntimeError(
+                            "yt-dlp completed but "
+                            "no video file was created"
+                        )
+
+                    # -------------------------------------------------
+                    # PREFER MP4
+                    # -------------------------------------------------
+
+                    mp4_files = [
+                        f
+                        for f in video_files
+                        if f.suffix.lower()
+                        == ".mp4"
+                    ]
+
+                    if mp4_files:
+
+                        candidate = max(
+                            mp4_files,
+                            key=lambda f:
+                            f.stat().st_size
+                        )
+
+                    else:
+
+                        candidate = max(
+                            video_files,
+                            key=lambda f:
+                            f.stat().st_size
+                        )
+
+                    # -------------------------------------------------
+                    # VERIFY ACTUAL RESOLUTION
+                    # -------------------------------------------------
+
+                    actual_height = (
+                        get_video_height(
+                            candidate
+                        )
+                    )
+
+                    print(
+                        "Requested:",
+                        f"{height}p"
+                    )
+
+                    print(
+                        "Actual:",
+                        (
+                            f"{actual_height}p"
+                            if actual_height
+                            else "Unknown"
+                        )
+                    )
+
+                    # -------------------------------------------------
+                    # NEVER ACCEPT LOWER QUALITY
+                    # -------------------------------------------------
+
+                    if (
+                        actual_height
+                        and actual_height < height
+                    ):
+
+                        raise RuntimeError(
+                            "Wrong quality received: "
+                            f"requested {height}p, "
+                            f"got {actual_height}p"
+                        )
+
+                    # If the actual resolution could not be
+                    # detected, do not silently accept a file
+                    # for high-resolution requests.
+                    if (
+                        actual_height is None
+                        and height >= 720
+                    ):
+
+                        raise RuntimeError(
+                            "Could not verify final "
+                            "video resolution"
+                        )
+
+                    # -------------------------------------------------
+                    # SUCCESS
+                    # -------------------------------------------------
+
+                    download_success = True
+
+                    print(
+                        "========================================"
+                    )
+
+                    print(
+                        "DOWNLOAD SUCCESS"
+                    )
+
+                    print(
+                        "Final file:",
+                        candidate
+                    )
+
+                    print(
+                        "Final size:",
+                        (
+                            candidate.stat().st_size
+                            / (1024 * 1024)
+                        ),
+                        "MB"
+                    )
+
+                    print(
+                        "========================================"
+                    )
+
+                    break
+
+                except Exception as e:
+
+                    last_download_error = e
+
+                    print(
+                        "========================================"
+                    )
+
+                    print(
+                        "DOWNLOAD ATTEMPT FAILED"
+                    )
+
+                    print(
+                        "Client:",
+                        clients
+                    )
+
+                    print(
+                        "Format:",
+                        format_selector
+                    )
+
+                    print(
+                        repr(e)
+                    )
+
+                    print(
+                        "========================================"
+                    )
 
         # =================================================
-        # FIND RESULT
+        # ALL DOWNLOADS FAILED
+        # =================================================
+
+        if not download_success:
+
+            if last_download_error:
+
+                raise last_download_error
+
+            raise RuntimeError(
+                "All download attempts failed"
+            )
+
+        # =================================================
+        # FIND FINAL FILE
         # =================================================
 
         files = [
@@ -978,14 +1346,6 @@ async def quality_selected(
             for f in temp_dir.glob("*")
             if f.is_file()
         ]
-
-        print(
-            "Files in temp directory:",
-            [
-                f.name
-                for f in files
-            ]
-        )
 
         video_files = [
             f
@@ -1002,18 +1362,14 @@ async def quality_selected(
         if not video_files:
 
             raise RuntimeError(
-                "yt-dlp completed but "
-                "final video file was not found"
+                "Final video file not found"
             )
-
-        # -------------------------------------------------
-        # PREFER MP4
-        # -------------------------------------------------
 
         mp4_files = [
             f
             for f in video_files
-            if f.suffix.lower() == ".mp4"
+            if f.suffix.lower()
+            == ".mp4"
         ]
 
         if mp4_files:
@@ -1033,29 +1389,70 @@ async def quality_selected(
             )
 
         # =================================================
-        # FINAL FILE INFORMATION
+        # FINAL RESOLUTION
         # =================================================
+
+        actual_height = (
+            get_video_height(
+                video_file
+            )
+        )
 
         final_size_mb = (
             video_file.stat().st_size
             / (1024 * 1024)
         )
 
-        print("========================================")
-        print("FINAL VIDEO READY")
+        print(
+            "========================================"
+        )
+
+        print(
+            "FINAL VIDEO"
+        )
+
         print(
             "Requested:",
             f"{height}p"
         )
+
         print(
-            "File:",
-            video_file
+            "Actual:",
+            (
+                f"{actual_height}p"
+                if actual_height
+                else "Unknown"
+            )
         )
+
         print(
             "Size:",
             f"{final_size_mb:.2f} MB"
         )
-        print("========================================")
+
+        print(
+            "File:",
+            video_file
+        )
+
+        print(
+            "========================================"
+        )
+
+        # =================================================
+        # FINAL SAFETY CHECK
+        # =================================================
+
+        if (
+            actual_height
+            and actual_height < height
+        ):
+
+            raise RuntimeError(
+                "Final quality check failed: "
+                f"requested {height}p but got "
+                f"{actual_height}p"
+            )
 
         # =================================================
         # TELEGRAM UPLOAD
@@ -1066,46 +1463,75 @@ async def quality_selected(
             "📤 Uploading to Telegram..."
         )
 
-        print("========================================")
-        print("TELEGRAM UPLOAD START")
+        print(
+            "========================================"
+        )
+
+        print(
+            "TELEGRAM UPLOAD START"
+        )
+
         print(
             "File:",
             video_file
         )
+
         print(
             "Size:",
             f"{final_size_mb:.2f} MB"
         )
-        print("========================================")
+
+        print(
+            "========================================"
+        )
 
         await callback.message.answer_document(
             FSInputFile(
                 video_file
             ),
+
             caption=(
                 f"🎬 {height}p\n"
                 "⚡ Fast Video Downloader"
             )
         )
 
-        print("========================================")
-        print("TELEGRAM UPLOAD SUCCESS")
-        print("========================================")
+        print(
+            "========================================"
+        )
+
+        print(
+            "TELEGRAM UPLOAD SUCCESS"
+        )
+
+        print(
+            "========================================"
+        )
 
         await callback.message.delete()
 
     except Exception as e:
 
-        print("========================================")
-        print("DOWNLOAD/UPLOAD ERROR")
-        print(repr(e))
-        print("========================================")
+        print(
+            "========================================"
+        )
+
+        print(
+            "DOWNLOAD/UPLOAD FINAL ERROR"
+        )
+
+        print(
+            repr(e)
+        )
+
+        print(
+            "========================================"
+        )
 
         await callback.message.edit_text(
             "❌ Download failed.\n\n"
             "The selected quality could not "
-            "be downloaded correctly.\n\n"
-            "Please try again."
+            "be downloaded correctly."
         )
 
     finally:
@@ -1139,6 +1565,91 @@ async def quality_selected(
 
 
 # =========================================================
+# VIDEO HEIGHT CHECK
+# =========================================================
+
+def get_video_height(
+    video_file: Path
+):
+
+    try:
+
+        result = subprocess.run(
+            [
+                FFMPEG_PATH,
+                "-hide_banner",
+                "-i",
+                str(video_file),
+            ],
+
+            stdout=subprocess.PIPE,
+
+            stderr=subprocess.PIPE,
+
+            text=True,
+
+            timeout=30,
+        )
+
+        output = (
+            result.stdout
+            + "\n"
+            + result.stderr
+        )
+
+        # Example:
+        # Video: ... 3840x2160 ...
+        matches = re.findall(
+            r"Video:.*?(\d{2,5})x(\d{2,5})",
+            output
+        )
+
+        if not matches:
+
+            # Some FFmpeg versions may put
+            # resolution in another line.
+            matches = re.findall(
+                r"(\d{3,5})x(\d{3,5})",
+                output
+            )
+
+        if not matches:
+            return None
+
+        heights = []
+
+        for width, height in matches:
+
+            try:
+
+                w = int(width)
+                h = int(height)
+
+                # Ignore tiny values that are not
+                # actual video dimensions.
+                if w >= 100 and h >= 100:
+
+                    heights.append(h)
+
+            except Exception:
+                pass
+
+        if not heights:
+            return None
+
+        return max(heights)
+
+    except Exception as e:
+
+        print(
+            "Resolution check error:",
+            repr(e)
+        )
+
+        return None
+
+
+# =========================================================
 # DOWNLOAD FUNCTION
 # =========================================================
 
@@ -1162,9 +1673,17 @@ def download_video(
 
 async def main():
 
-    print("========================================")
-    print("Video Downloader 4K")
-    print("Bot started...")
+    print(
+        "========================================"
+    )
+
+    print(
+        "Video Downloader 4K"
+    )
+
+    print(
+        "Bot started..."
+    )
 
     print(
         "Telegram Local API:",
@@ -1188,7 +1707,9 @@ async def main():
         YOUTUBE_CLIENTS
     )
 
-    print("========================================")
+    print(
+        "========================================"
+    )
 
     await dp.start_polling(
         bot
@@ -1203,4 +1724,4 @@ if __name__ == "__main__":
 
     asyncio.run(
         main()
-    )
+                    )
