@@ -102,18 +102,15 @@ user_formats = {}
 # YOUTUBE CLIENT ORDER
 # =========================================================
 #
-# Try multiple YouTube clients so that if one client is
-# blocked by YouTube, the next client is tried automatically.
-# mweb remains important because the bgutil PO Token provider
-# is configured for it.
+# Try clients that currently don't require GVS PO token
+# before mweb. mweb remains as a fallback.
 # =========================================================
 
 YOUTUBE_CLIENTS = [
-    ["mweb"],
-    ["web_safari"],
-    ["tv"],
     ["android_vr"],
+    ["tv"],
     ["web_embedded"],
+    ["mweb"],
 ]
 
 
@@ -123,20 +120,15 @@ YOUTUBE_CLIENTS = [
 
 def youtube_extractor_args(clients):
 
-    provider_url = (POT_PROVIDER_URL or "").strip().rstrip("/")
-
-    args = {
+    return {
         "youtube": {
             "player_client": clients
+        },
+
+        "youtubepot-bgutilhttp": {
+            "base_url": POT_PROVIDER_URL
         }
     }
-
-    if provider_url:
-        args["youtubepot-bgutilhttp"] = {
-            "base_url": provider_url
-        }
-
-    return args
 
 
 # =========================================================
@@ -895,8 +887,6 @@ async def handle_message(
             "❌ Could not analyze this link.\n\n"
             "Please try another video link."
         )
-
-
 # =========================================================
 # QUALITY SELECTED
 # =========================================================
@@ -925,7 +915,7 @@ async def quality_selected(
 
         await callback.answer(
             "Selection expired. "
-                        "Send the link again.",
+            "Send the link again.",
             show_alert=True
         )
 
@@ -1495,48 +1485,16 @@ async def quality_selected(
             "========================================"
         )
 
-        # Large Local Bot API uploads can take several minutes.
-        # Give the Telegram request enough time to finish.
-        try:
+        await callback.message.answer_document(
+            FSInputFile(
+                video_file
+            ),
 
-            await callback.message.answer_document(
-                FSInputFile(
-                    video_file
-                ),
-
-                caption=(
-                    f"🎬 {height}p\n"
-                    "⚡ Fast Video Downloader"
-                ),
-
-                request_timeout=1800,
+            caption=(
+                f"🎬 {height}p\n"
+                "⚡ Fast Video Downloader"
             )
-
-        except Exception as upload_error:
-
-            print(
-                "========================================"
-            )
-
-            print(
-                "TELEGRAM UPLOAD ERROR"
-            )
-
-            print(
-                repr(upload_error)
-            )
-
-            print(
-                "========================================"
-            )
-
-            await callback.message.edit_text(
-                "❌ Telegram upload failed.\n\n"
-                "The video was downloaded correctly, "
-                "but Telegram did not finish the upload."
-            )
-
-            return
+        )
 
         print(
             "========================================"
@@ -1550,18 +1508,7 @@ async def quality_selected(
             "========================================"
         )
 
-        # Deleting the status message must never turn a
-        # successful upload into a false failure.
-        try:
-
-            await callback.message.delete()
-
-        except Exception as delete_error:
-
-            print(
-                "STATUS MESSAGE DELETE IGNORED:",
-                repr(delete_error)
-            )
+        await callback.message.delete()
 
     except Exception as e:
 
@@ -1570,7 +1517,7 @@ async def quality_selected(
         )
 
         print(
-            "DOWNLOAD FINAL ERROR"
+            "DOWNLOAD/UPLOAD FINAL ERROR"
         )
 
         print(
@@ -1777,4 +1724,4 @@ if __name__ == "__main__":
 
     asyncio.run(
         main()
-    )
+            )
