@@ -102,15 +102,18 @@ user_formats = {}
 # YOUTUBE CLIENT ORDER
 # =========================================================
 #
-# Try clients that currently don't require GVS PO token
-# before mweb. mweb remains as a fallback.
+# Try multiple YouTube clients so that if one client is
+# blocked by YouTube, the next client is tried automatically.
+# mweb remains important because the bgutil PO Token provider
+# is configured for it.
 # =========================================================
 
 YOUTUBE_CLIENTS = [
-    ["android_vr"],
-    ["tv"],
-    ["web_embedded"],
     ["mweb"],
+    ["web_safari"],
+    ["tv"],
+    ["android_vr"],
+    ["web_embedded"],
 ]
 
 
