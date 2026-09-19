@@ -131,11 +131,9 @@ def youtube_extractor_args(clients):
         }
     }
 
-    # Use bgutil PO Token provider only when a valid URL exists.
     if provider_url:
         args["youtubepot-bgutilhttp"] = {
-            "base_url": provider_url,
-            "disable_innertube": "1"
+            "base_url": provider_url
         }
 
     return args
