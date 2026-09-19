@@ -123,15 +123,22 @@ YOUTUBE_CLIENTS = [
 
 def youtube_extractor_args(clients):
 
-    return {
+    provider_url = (POT_PROVIDER_URL or "").strip().rstrip("/")
+
+    args = {
         "youtube": {
             "player_client": clients
-        },
-
-        "youtubepot-bgutilhttp": {
-            "base_url": POT_PROVIDER_URL
         }
     }
+
+    # Use bgutil PO Token provider only when a valid URL exists.
+    if provider_url:
+        args["youtubepot-bgutilhttp"] = {
+            "base_url": provider_url,
+            "disable_innertube": "1"
+        }
+
+    return args
 
 
 # =========================================================
