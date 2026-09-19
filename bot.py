@@ -886,7 +886,9 @@ async def handle_message(
         await status.edit_text(
             "❌ Could not analyze this link.\n\n"
             "Please try another video link."
-                )
+        )
+
+
 # =========================================================
 # QUALITY SELECTED
 # =========================================================
@@ -915,7 +917,7 @@ async def quality_selected(
 
         await callback.answer(
             "Selection expired. "
-            "Send the link again.",
+                        "Send the link again.",
             show_alert=True
         )
 
@@ -1485,16 +1487,48 @@ async def quality_selected(
             "========================================"
         )
 
-        await callback.message.answer_document(
-            FSInputFile(
-                video_file
-            ),
+        # Large Local Bot API uploads can take several minutes.
+        # Give the Telegram request enough time to finish.
+        try:
 
-            caption=(
-                f"🎬 {height}p\n"
-                "⚡ Fast Video Downloader"
+            await callback.message.answer_document(
+                FSInputFile(
+                    video_file
+                ),
+
+                caption=(
+                    f"🎬 {height}p\n"
+                    "⚡ Fast Video Downloader"
+                ),
+
+                request_timeout=1800,
             )
-        )
+
+        except Exception as upload_error:
+
+            print(
+                "========================================"
+            )
+
+            print(
+                "TELEGRAM UPLOAD ERROR"
+            )
+
+            print(
+                repr(upload_error)
+            )
+
+            print(
+                "========================================"
+            )
+
+            await callback.message.edit_text(
+                "❌ Telegram upload failed.\n\n"
+                "The video was downloaded correctly, "
+                "but Telegram did not finish the upload."
+            )
+
+            return
 
         print(
             "========================================"
@@ -1508,7 +1542,18 @@ async def quality_selected(
             "========================================"
         )
 
-        await callback.message.delete()
+        # Deleting the status message must never turn a
+        # successful upload into a false failure.
+        try:
+
+            await callback.message.delete()
+
+        except Exception as delete_error:
+
+            print(
+                "STATUS MESSAGE DELETE IGNORED:",
+                repr(delete_error)
+            )
 
     except Exception as e:
 
@@ -1517,7 +1562,7 @@ async def quality_selected(
         )
 
         print(
-            "DOWNLOAD/UPLOAD FINAL ERROR"
+            "DOWNLOAD FINAL ERROR"
         )
 
         print(
@@ -1724,4 +1769,4 @@ if __name__ == "__main__":
 
     asyncio.run(
         main()
-                    )
+ 
